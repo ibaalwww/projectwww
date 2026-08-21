@@ -353,6 +353,104 @@ enum SystemCacheService {
     }
 }
 
+// MARK: - Filesystem capability detection
+
+enum FilesystemCapabilityLevel: Int, CaseIterable, Identifiable {
+    case sandbox
+    case containers
+    case varDB
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .sandbox: return "Sandbox"
+        case .containers: return "Containers"
+        case .varDB: return "/var/db"
+        }
+    }
+
+    var path: String {
+        switch self {
+        case .sandbox:
+            return NSHomeDirectory()
+        case .containers:
+            return "/var/mobile/Containers"
+        case .varDB:
+            return "/var/db"
+        }
+    }
+}
+
+struct FilesystemCapabilityResult: Equatable, Identifiable {
+    let level: FilesystemCapabilityLevel
+    let exists: Bool
+    let readable: Bool
+    let enumerable: Bool
+    let detail: String
+
+    var id: FilesystemCapabilityLevel { level }
+
+    var available: Bool {
+        readable && enumerable
+    }
+}
+
+enum FilesystemCapabilityService {
+    static func scan() -> [FilesystemCapabilityResult] {
+        FilesystemCapabilityLevel.allCases.map(test)
+    }
+
+    static func canEnumerate(_ level: FilesystemCapabilityLevel) -> Bool {
+        test(level).available
+    }
+
+    private static func test(_ level: FilesystemCapabilityLevel) -> FilesystemCapabilityResult {
+        let path = level.path
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+
+        guard exists else {
+            return FilesystemCapabilityResult(
+                level: level,
+                exists: false,
+                readable: false,
+                enumerable: false,
+                detail: "Path unavailable"
+            )
+        }
+
+        guard isDirectory.boolValue else {
+            return FilesystemCapabilityResult(
+                level: level,
+                exists: true,
+                readable: false,
+                enumerable: false,
+                detail: "Not a directory"
+            )
+        }
+
+        do {
+            let entries = try FileManager.default.contentsOfDirectory(atPath: path)
+            return FilesystemCapabilityResult(
+                level: level,
+                exists: true,
+                readable: true,
+                enumerable: true,
+                detail: "\(entries.count) entries"
+            )
+        } catch {
+            return FilesystemCapabilityResult(
+                level: level,
+                exists: true,
+                readable: false,
+                enumerable: false,
+                detail: "Access denied"
+            )
+        }
+    }
+}
+
 // MARK: - Diagnostics + media storage scanner
 
 struct DiagnosticFileUsage: Equatable, Identifiable {
@@ -431,7 +529,12 @@ enum DiagnosticCleanupService {
     }
 
     static func scan() -> [DiagnosticDirectoryUsage] {
-        targetNames.map { name in
+        guard FilesystemCapabilityService.canEnumerate(.varDB) else {
+            log("diagnostics: /var/db is not accessible; scan skipped")
+            return []
+        }
+
+        return targetNames.map { name in
             let path = "\(root)/\(name)"
             var bytes: Int64 = 0
             var files: [DiagnosticFileUsage] = []
@@ -497,6 +600,16 @@ enum DiagnosticCleanupService {
     }
 
     static func clean() -> DiagnosticCleanupResult {
+        guard FilesystemCapabilityService.canEnumerate(.varDB) else {
+            log("diagnostics: /var/db is not accessible; clean skipped")
+            return DiagnosticCleanupResult(
+                beforeBytes: 0,
+                afterBytes: 0,
+                removedItemCount: 0,
+                failedItemCount: 0
+            )
+        }
+
         let before = totalUsage()
         var removed = 0
         var failed = 0
