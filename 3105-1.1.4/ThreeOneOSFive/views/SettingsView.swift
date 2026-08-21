@@ -42,7 +42,7 @@ struct SettingsView: View {
                     LabeledContent(language.text("settings.ios_version"), value: "\(AppInfo.osVersion) (\(AppInfo.osBuild))")
                 }
 
-                Section("System Controls") {
+                Section {
                     Toggle("Disable thermalmonitord", isOn: $thermalDisabled)
                         .onChange(of: thermalDisabled) { value in
                             applyThermal(value)
@@ -67,6 +67,8 @@ struct SettingsView: View {
                         )
                     }
                     .disabled(systemCacheUsage.bytes == 0)
+                } header: {
+                    Text("System Controls")
                 } footer: {
                     Text("Thermal/OTA changes are stored in launchd disabled.plist and require a reboot. Cache cleanup only touches the allowlisted cache/log folders.")
                 }
@@ -104,7 +106,7 @@ struct SettingsView: View {
                         url: "https://github.com/YangJiiii/3105"
                     )
                     creditsRow(
-                        name: "Cộng Đồng IOSVN",
+                        name: "Cá»ng Äá»ng IOSVN",
                         role: language.text("social.iosvn_role"),
                         url: "https://t.me/ioscrackvn"
                     )
