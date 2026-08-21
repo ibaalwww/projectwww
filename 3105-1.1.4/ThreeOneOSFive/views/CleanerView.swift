@@ -18,7 +18,10 @@ struct CleanerView: View {
     @State private var selectedDiagnosticDirectory: DiagnosticDirectoryUsage?
     @State private var storageHotspots: [StorageHotspotUsage] = []
     @State private var topStorageFiles: [DiagnosticFileUsage] = []
+    @State private var filesystemCapabilities: [FilesystemCapabilityResult] = []
     @State private var showingTopStorageFiles = false
+    @State private var isRunningExploit = false
+    @State private var exploitStatus = "Not run"
 
     private var filteredRecords: [CleanerAppRecord] {
         let matchingRecords: [CleanerAppRecord]
@@ -109,6 +112,7 @@ struct CleanerView: View {
     @ViewBuilder
     private var cleanerList: some View {
         List {
+            filesystemCapabilitySection
             diagnosticSection
             storageHotspotSection
             if records.isEmpty {
@@ -117,6 +121,73 @@ struct CleanerView: View {
                 summarySection
                 applicationsSection
             }
+        }
+    }
+
+    private var filesystemCapabilitySection: some View {
+        Section {
+            ForEach(filesystemCapabilities) { result in
+                HStack(spacing: 10) {
+                    Image(systemName: result.available ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(result.available ? Color.green : Color.secondary)
+                        .frame(width: 24)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(result.level.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(result.level.path)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(result.available ? "Available" : "Denied")
+                            .font(.caption.weight(.semibold))
+                        Text(result.detail)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+
+            Button {
+                runExploit()
+            } label: {
+                if isRunningExploit {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Label("Run Exploit", systemImage: "bolt.shield")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .disabled(isBusy || isRunningExploit)
+            .padding(.vertical, 4)
+
+            Button {
+                filesystemCapabilities = FilesystemCapabilityService.scan()
+            } label: {
+                Label("Scan Filesystem Access", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .disabled(isBusy || isRunningExploit)
+            .padding(.vertical, 4)
+
+            Text("Exploit: \(exploitStatus)")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
+        } header: {
+            Label("Filesystem Access", systemImage: "lock.shield")
+        } footer: {
+            Text("Checks access in three levels: the app sandbox, /var/mobile/Containers, and /var/db. Access to one level does not imply access to the next.")
         }
     }
 
@@ -532,6 +603,29 @@ struct CleanerView: View {
         }
     }
 
+    private func runExploit() {
+        guard !isBusy && !isRunningExploit else { return }
+
+        isRunningExploit = true
+        exploitStatus = "Runningâ¦"
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let success = KernelExploit.run()
+            let capabilities = FilesystemCapabilityService.scan()
+
+            DispatchQueue.main.async {
+                isRunningExploit = false
+                exploitStatus = success ? "Completed" : "Failed / unsupported"
+                filesystemCapabilities = capabilities
+
+                // Refresh the cleaner only when system access changed.
+                if success {
+                    reload()
+                }
+            }
+        }
+    }
+
     private func reload() {
         guard !isBusy else { return }
 #if targetEnvironment(simulator)
@@ -608,10 +702,12 @@ struct CleanerView: View {
         topStorageFiles = []
 
         DispatchQueue.global(qos: .userInitiated).async {
+            let capabilities = FilesystemCapabilityService.scan()
             let diagnostics = DiagnosticCleanupService.scan()
             let hotspots = DiagnosticCleanupService.scanStorageHotspots()
             DispatchQueue.main.async {
                 guard scanID == requestID else { return }
+                filesystemCapabilities = capabilities
                 diagnosticUsage = diagnostics
                 storageHotspots = hotspots
             }
