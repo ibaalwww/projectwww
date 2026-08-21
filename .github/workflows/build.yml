@@ -1,1 +1,76 @@
+name: Build 3105
 
+on:
+  push:
+    branches:
+      - main
+      - master
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build unsigned archive
+        run: |
+          set -e
+
+          rm -rf build
+
+          xcodebuild \
+            -project "3105-1.1.4/ThreeOneOSFive.xcodeproj" \
+            -scheme "3105" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -archivePath "$PWD/build/3105.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            archive
+
+      - name: Create unsigned IPA
+        run: |
+          set -e
+
+          APP_PATH="build/3105.xcarchive/Products/Applications/3105.app"
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: 3105.app tidak ditemukan:"
+            find build/3105.xcarchive -maxdepth 5 -type d -name "*.app"
+            exit 1
+          fi
+
+          rm -rf build/Payload
+          mkdir -p build/Payload
+
+          cp -R "$APP_PATH" "build/Payload/3105.app"
+
+          cd build
+          zip -qry "3105-unsigned.ipa" "Payload"
+
+          echo "IPA berhasil dibuat:"
+          ls -lh "3105-unsigned.ipa"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3105-ipa
+          path: build/3105-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Upload XCArchive
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3105-archive
+          path: build/3105.xcarchive
+          if-no-files-found: error
